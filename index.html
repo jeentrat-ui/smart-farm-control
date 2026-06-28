@@ -9,7 +9,7 @@
         body { background-color: #f4f6f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         .control-card { max-width: 400px; margin: 50px auto; padding: 30px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); background: white; text-align: center; }
         .btn-control { width: 100%; padding: 15px; font-size: 1.2rem; font-weight: bold; margin-bottom: 15px; border-radius: 10px; transition: 0.3s; }
-        .status-badge { font-size: 1.1rem; padding: 8px 20px; border-radius: 20px; inline-block: max-content; }
+        .status-badge { font-size: 1.1rem; padding: 8px 20px; border-radius: 20px; display: inline-block; }
     </style>
 </head>
 <body>
@@ -21,8 +21,9 @@
         <hr>
         
         <div class="my-4">
-            <h5>สถานะคำสั่งปัจจุบัน:</h5>
+            <h5>สถานะปั๊มน้ำจริงจากฟาร์ม:</h5>
             <span id="pumpStatus" class="badge bg-secondary status-badge">กำลังโหลด...</span>
+            <div id="lastUpdate" class="text-muted small mt-2"></div>
         </div>
 
         <hr class="mb-4">
@@ -33,37 +34,52 @@
 </div>
 
 <script>
-    // ⚠️ นำค่าคอนฟิกมาจากโค้ด ESP32 ของคุณ
     const FIREBASE_HOST = "https://the-project-aaa42-default-rtdb.asia-southeast1.firebasedatabase.app";
     const FIREBASE_AUTH = "pChjJULtG1ph17cyDgzVVcc0h78N4DfUL1qDzvEU";
     
-    // URL สำหรับจัดการกับปุ่มปั๊มน้ำโดยเฉพาะ
-    const url = `${FIREBASE_HOST}/pump_control.json?auth=${FIREBASE_AUTH}`;
+    // URL สำหรับส่งคำสั่งควบคุม
+    const cmdUrl = `${FIREBASE_HOST}/pump_control.json?auth=${FIREBASE_AUTH}`;
+    
+    // URL สำหรับดึงประวัติล่าสุด (กรองข้อมูลเอาแถวสุดท้ายที่ ESP32 ส่งขึ้นมา)
+    const historyUrl = `${FIREBASE_HOST}/sensor_history.json?auth=${FIREBASE_AUTH}&orderBy="$key"&limitToLast=1`;
 
-    // ฟังก์ชันดึงสถานะล่าสุดจาก Firebase มาโชว์บนหน้าเว็บ
-    function checkCurrentStatus() {
-        fetch(url)
+    // ฟังก์ชันดึงสถานะจริงจากประวัติเซ็นเซอร์ (ที่ ESP32 อัปเดตขึ่้นมา)
+    function checkRealStatus() {
+        fetch(historyUrl)
             .then(response => response.json())
             .then(data => {
                 const statusBadge = document.getElementById('pumpStatus');
-                if (data === 1) {
-                    statusBadge.innerText = "เปิดใช้งาน (ON)";
-                    statusBadge.className = "badge bg-success status-badge";
-                } else if (data === 0) {
-                    statusBadge.innerText = "ปิดใช้งาน (OFF)";
-                    statusBadge.className = "badge bg-danger status-badge";
-                } else {
-                    statusBadge.innerText = "ออโต้ / ไม่ทราบสถานะ";
-                    statusBadge.className = "badge bg-warning text-dark status-badge";
+                const timeDiv = document.getElementById('lastUpdate');
+                
+                if (data && Object.keys(data).length > 0) {
+                    // ดึง Key แรกที่ได้มาจาก limitToLast=1
+                    const key = Object.keys(data)[0];
+                    const lastRecord = data[key];
+                    
+                    const actualPumpState = lastRecord.pump ? lastRecord.pump.trim() : "";
+                    const syncTime = lastRecord.timestamp || "-";
+
+                    // ตรวจสอบค่าสถานะปั๊มจริงจากบอร์ด
+                    if (actualPumpState === "ON") {
+                        statusBadge.innerText = "กำลังทำงาน (ON)";
+                        statusBadge.className = "badge bg-success status-badge";
+                    } else if (actualPumpState === "OFF") {
+                        statusBadge.innerText = "หยุดทำงาน (OFF)";
+                        statusBadge.className = "badge bg-danger status-badge";
+                    } else {
+                        statusBadge.innerText = "ไม่ทราบสถานะจริง";
+                        statusBadge.className = "badge bg-warning text-dark status-badge";
+                    }
+                    
+                    timeDiv.innerText = `อัปเดตล่าสุดจากบอร์ด: ${syncTime}`;
                 }
             })
-            .catch(err => console.error("Error fetching status:", err));
+            .catch(err => console.error("Error fetching real status:", err));
     }
 
-    // ฟังก์ชันส่งค่า 1 หรือ 0 ไปที่ Firebase เมื่อกดปุ่ม
+    // ฟังก์ชันส่งคำสั่งควบคุม (เขียนทับไปที่ pump_control.json)
     function controlPump(value) {
-        // ใช้คำสั่ง PUT เพื่อเขียนทับค่าเดิมใน pump_control
-        fetch(url, {
+        fetch(cmdUrl, {
             method: 'PUT',
             body: JSON.stringify(value),
             headers: {
@@ -72,8 +88,9 @@
         })
         .then(response => response.json())
         .then(data => {
-            alert(value === 1 ? "ส่งคำสั่ง 'เปิดปั๊ม' สำเร็จ!" : "ส่งคำสั่ง 'ปิดปั๊ม' สำเร็จ!");
-            checkCurrentStatus(); // อัปเดตสถานะบนหน้าเว็บทันที
+            alert(value === 1 ? "ส่งคำสั่ง 'เปิดปั๊ม' ไปยังคลาวด์แล้ว\n(ปั๊มจะทำงานในรอบถัดไป)" : "ส่งคำสั่ง 'ปิดปั๊ม' ไปยังคลาวด์แล้ว");
+            // หน่วงเวลาเล็กน้อยเพื่อให้บอร์ดรับคำสั่งและส่งสถานะกลับมา จากนั้นทำการเช็คสถานะทันที
+            setTimeout(checkRealStatus, 2000);
         })
         .catch(err => {
             alert("เกิดข้อผิดพลาดในการส่งคำสั่ง");
@@ -81,9 +98,11 @@
         });
     }
 
-    // สั่งให้เช็คสถานะจาก Firebase ทุกๆ 3 วินาทีเพื่อให้หน้าเว็บตรงกับความจริงเสมอ
-    checkCurrentStatus();
-    setInterval(checkCurrentStatus, 3000);
+    // เรียกทำงานทันทีเมื่อเปิดหน้าเว็บ
+    checkRealStatus();
+    
+    // ตั้งเวลาให้เช็คสถานะจากบอร์ดทุกๆ 5 วินาที
+    setInterval(checkRealStatus, 5000);
 </script>
 
 </body>
