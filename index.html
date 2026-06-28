@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Farm Pump Control</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .control-card { max-width: 400px; margin: 50px auto; padding: 30px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); background: white; text-align: center; }
+        .btn-control { width: 100%; padding: 15px; font-size: 1.2rem; font-weight: bold; margin-bottom: 15px; border-radius: 10px; transition: 0.3s; }
+        .status-badge { font-size: 1.1rem; padding: 8px 20px; border-radius: 20px; inline-block: max-content; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="control-card">
+        <h3 class="mb-4 text-success">🌿 เครื่องมือควบคุมปั๊มน้ำ</h3>
+        <p class="text-muted">ควบคุมและสั่งการปั๊มน้ำผ่านระบบ Cloud</p>
+        
+        <hr>
+        
+        <div class="my-4">
+            <h5>สถานะคำสั่งปัจจุบัน:</h5>
+            <span id="pumpStatus" class="badge bg-secondary status-badge">กำลังโหลด...</span>
+        </div>
+
+        <hr class="mb-4">
+
+        <button onclick="controlPump(1)" class="btn btn-success btn-control">🟢 สั่งเปิดปั๊มน้ำ (ON)</button>
+        <button onclick="controlPump(0)" class="btn btn-danger btn-control">🔴 สั่งปิดปั๊มน้ำ (OFF)</button>
+    </div>
+</div>
+
+<script>
+    // ⚠️ นำค่าคอนฟิกมาจากโค้ด ESP32 ของคุณ
+    const FIREBASE_HOST = "https://the-project-aaa42-default-rtdb.asia-southeast1.firebasedatabase.app";
+    const FIREBASE_AUTH = "pChjJULtG1ph17cyDgzVVcc0h78N4DfUL1qDzvEU";
+    
+    // URL สำหรับจัดการกับปุ่มปั๊มน้ำโดยเฉพาะ
+    const url = `${FIREBASE_HOST}/pump_control.json?auth=${FIREBASE_AUTH}`;
+
+    // ฟังก์ชันดึงสถานะล่าสุดจาก Firebase มาโชว์บนหน้าเว็บ
+    function checkCurrentStatus() {
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                const statusBadge = document.getElementById('pumpStatus');
+                if (data === 1) {
+                    statusBadge.innerText = "เปิดใช้งาน (ON)";
+                    statusBadge.className = "badge bg-success status-badge";
+                } else if (data === 0) {
+                    statusBadge.innerText = "ปิดใช้งาน (OFF)";
+                    statusBadge.className = "badge bg-danger status-badge";
+                } else {
+                    statusBadge.innerText = "ออโต้ / ไม่ทราบสถานะ";
+                    statusBadge.className = "badge bg-warning text-dark status-badge";
+                }
+            })
+            .catch(err => console.error("Error fetching status:", err));
+    }
+
+    // ฟังก์ชันส่งค่า 1 หรือ 0 ไปที่ Firebase เมื่อกดปุ่ม
+    function controlPump(value) {
+        // ใช้คำสั่ง PUT เพื่อเขียนทับค่าเดิมใน pump_control
+        fetch(url, {
+            method: 'PUT',
+            body: JSON.stringify(value),
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(value === 1 ? "ส่งคำสั่ง 'เปิดปั๊ม' สำเร็จ!" : "ส่งคำสั่ง 'ปิดปั๊ม' สำเร็จ!");
+            checkCurrentStatus(); // อัปเดตสถานะบนหน้าเว็บทันที
+        })
+        .catch(err => {
+            alert("เกิดข้อผิดพลาดในการส่งคำสั่ง");
+            console.error(err);
+        });
+    }
+
+    // สั่งให้เช็คสถานะจาก Firebase ทุกๆ 3 วินาทีเพื่อให้หน้าเว็บตรงกับความจริงเสมอ
+    checkCurrentStatus();
+    setInterval(checkCurrentStatus, 3000);
+</script>
+
+</body>
+</html>
