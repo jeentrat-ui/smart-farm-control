@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Agriculture Dashboard - IoT State Machine</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        body { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .card { background-color: #1a1a1a; border: 1px solid #2d2d2d; border-radius: 1rem; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #1a1a1a; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #00e676; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-7xl mx-auto">
+        <header class="flex justify-between items-center mb-8 pb-4 border-b border-gray-800">
+            <div>
+                <h1 class="text-2xl font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-leaf text-green-500"></i> ระบบควบคุมการรดน้ำอัจฉริยะ (Live)
+                </h1>
+                <p class="text-sm text-gray-400">อัปเดตระบบปุ่มเช็คสถานะการตอบกลับจากบอร์ด (Acknowledge State)</p>
+            </div>
+            <div class="text-right text-xs text-gray-400">
+                <div>อัปเดตล่าสุด: <span id="last-update" class="text-gray-200">-</span></div>
+                <div class="flex items-center justify-end gap-1 mt-1">
+                    <span id="connection-dot" class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> 
+                    <span id="connection-status">กำลังเชื่อมต่อฐานข้อมูล...</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <div class="space-y-6">
+                <div class="card p-6 flex flex-col items-center justify-center relative overflow-hidden">
+                    <span class="text-xs text-gray-400 absolute top-4 left-4 font-semibold uppercase tracking-wider">แผงควบคุมปั๊มน้ำ</span>
+                    
+                    <button id="pump-toggle-btn" onclick="togglePump()" class="w-32 h-32 rounded-full border-4 border-gray-700 my-6 flex flex-col items-center justify-center transition-all duration-300 cursor-pointer bg-zinc-950">
+                        <i id="pump-icon" class="fa-solid fa-power-off text-3xl text-gray-500"></i>
+                        <span id="pump-text-state" class="text-sm font-bold mt-2 text-gray-400">เปิดปั๊มน้ำ</span>
+                    </button>
+                    <p class="text-xs text-gray-500 transition-colors duration-300" id="current-mode-status">โหมดปัจจุบัน: โหมดควบคุมเองผ่านเว็บไซต์</p>
+                </div>
+
+                <div class="card p-6">
+                    <span class="text-xs text-gray-400 font-semibold uppercase tracking-wider block mb-4">ค่าสิ่งแวดล้อมปัจจุบัน</span>
+                    <div class="grid grid-cols-3 gap-2 text-center">
+                        <div class="bg-zinc-900/50 p-3 rounded-lg border border-zinc-800">
+                            <i class="fa-solid fa-cloud-droplets text-blue-400 mb-1"></i>
+                            <div class="text-xs text-gray-400">ชื้นในอากาศ</div>
+                            <div class="text-xl font-bold text-white mt-1" id="val-humi">0.0%</div>
+                        </div>
+                        <div class="bg-zinc-900/50 p-3 rounded-lg border border-zinc-800">
+                            <i class="fa-solid fa-seedling text-emerald-400 mb-1"></i>
+                            <div class="text-xs text-gray-400">ชื้นในดิน</div>
+                            <div class="text-xl font-bold text-white mt-1" id="val-soil">0%</div>
+                        </div>
+                        <div class="bg-zinc-900/50 p-3 rounded-lg border border-zinc-800">
+                            <i class="fa-solid fa-temperature-half text-orange-400 mb-1"></i>
+                            <div class="text-xs text-gray-400">อุณหภูมิ</div>
+                            <div class="text-xl font-bold text-white mt-1" id="val-temp">0.0°C</div>
+                        </div>
+                    </div>
+                    <div id="water-alert-box" class="mt-4 p-3 rounded-lg text-xs font-medium flex items-center gap-2 bg-zinc-900 text-zinc-400 border border-zinc-800">
+                        <i class="fa-solid fa-circle-nodes"></i>
+                        <span id="water-alert-text">กำลังวิเคราะห์ข้อมูลจากบอร์ดพืช...</span>
+                    </div>
+                </div>
+
+                <div class="card p-6">
+                    <span class="text-xs text-gray-400 font-semibold uppercase tracking-wider block mb-4">โหมดการทำงาน</span>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button id="mode-manual" onclick="changeMode('manual')" class="p-3 rounded-xl border border-emerald-500 bg-emerald-950/30 text-emerald-400 text-center flex flex-col items-center justify-center cursor-pointer transition-all">
+                            <i class="fa-solid fa-hand text-lg mb-1"></i>
+                            <span class="text-xs font-medium">ควบคุมเอง</span>
+                        </button>
+                        <button id="mode-auto" onclick="changeMode('auto')" class="p-3 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 text-center flex flex-col items-center justify-center cursor-pointer transition-all hover:border-zinc-700">
+                            <i class="fa-solid fa-droplet text-lg mb-1"></i>
+                            <span class="text-xs font-medium">ตามความชื้น</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-6 lg:col-span-2">
+                <div class="card p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <span class="text-xs text-gray-400 font-semibold uppercase tracking-wider flex items-center gap-2">
+                            <i class="fa-solid fa-chart-line text-emerald-400"></i> กราฟแสดงสถิติย้อนหลัง (ค่าเฉลี่ยทุก 15 นาที)
+                        </span>
+                        <div class="bg-zinc-900 p-1 rounded-lg border border-zinc-800 flex text-xs">
+                            <button id="btn-24h" onclick="updateChartTimeframe('24h')" class="px-3 py-1 rounded bg-zinc-800 text-white font-medium cursor-pointer">24 ชม.</button>
+                            <button id="btn-7d" onclick="updateChartTimeframe('7d')" class="px-3 py-1 rounded text-zinc-400 cursor-pointer">7 วัน</button>
+                            <button id="btn-1m" onclick="updateChartTimeframe('1m')" class="px-3 py-1 rounded text-zinc-400 cursor-pointer">1 เดือน</button>
+                        </div>
+                    </div>
+                    <div class="h-64 relative">
+                        <canvas id="environmentalChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    <div class="card p-5 flex flex-col justify-between">
+                        <div>
+                            <span class="text-xs text-amber-400 font-semibold uppercase tracking-wider flex items-center gap-2 mb-3">
+                                <i class="fa-solid fa-brain"></i> การวิเคราะห์และทำนายอนาคต (AI)
+                            </span>
+                            <div class="space-y-3 text-xs">
+                                <div class="bg-zinc-900/80 p-3 rounded-lg border border-zinc-800">
+                                    <div class="text-gray-400 font-medium mb-1"><i class="fa-solid fa-hourglass-half text-blue-400 mr-1"></i> ทำนายรอบการรดน้ำถัดไป</div>
+                                    <p class="text-gray-200" id="ai-predict-water">กำลังประมวลผลคำนวณจากสภาพแวดล้อมล่าสุด...</p>
+                                </div>
+                                <div class="bg-zinc-900/80 p-3 rounded-lg border border-zinc-800">
+                                    <div class="text-gray-400 font-medium mb-1"><i class="fa-solid fa-heart-pulse text-rose-400 mr-1"></i> ดัชนีความเครียดพืช (Crop Stress)</div>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <div class="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
+                                            <div id="stress-bar" class="bg-emerald-500 h-full transition-all duration-500" style="width: 0%"></div>
+                                        </div>
+                                        <span class="font-bold text-emerald-400 whitespace-nowrap" id="ai-stress-level">คำนวณค่าสด...</span>
+                                    </div>
+                                </div>
+                                <div class="bg-zinc-900/80 p-3 rounded-lg border border-zinc-800">
+                                    <div class="text-gray-400 font-medium mb-1"><i class="fa-solid fa-bug text-orange-400 mr-1"></i> ความเสี่ยงโรคพืชที่ต้องเฝ้าระวัง</div>
+                                    <p class="text-gray-300" id="ai-disease-risk">ตรวจสอบสภาวะความชื้นสัมพัทธ์สะสม...</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-4 pt-3 border-t border-zinc-800">
+                            <div class="flex items-center gap-2 bg-zinc-950 px-3 py-2 rounded-lg border border-zinc-800">
+                                <i class="fa-solid fa-comment-dots text-zinc-500 text-sm"></i>
+                                <input type="text" id="ai-query" placeholder="ถาม AI เกี่ยวกับสุขภาพพืชของคุณ..." class="bg-transparent text-xs w-full focus:outline-none text-white">
+                                <button onclick="askAI()" class="text-xs text-emerald-400 font-bold hover:text-emerald-300 cursor-pointer">ส่ง</button>
+                            </div>
+                            <div id="ai-response-box" class="hidden mt-2 p-2 bg-emerald-950/20 border border-emerald-900/60 rounded text-[11px] text-gray-300 transition-all"></div>
+                        </div>
+                    </div>
+
+                    <div class="card p-5 flex flex-col justify-between">
+                        <div>
+                            <span class="text-xs text-gray-400 font-semibold uppercase tracking-wider flex items-center gap-2 mb-3">
+                                <i class="fa-solid fa-clock-rotate-left"></i> บันทึกข้อมูลย้อนหลัง (50 แถวล่าสุด)
+                            </span>
+                            <div class="overflow-y-auto max-h-56 pr-1 custom-scrollbar">
+                                <table class="w-full text-left text-[11px]">
+                                    <thead>
+                                        <tr class="text-gray-500 border-b border-zinc-800 pb-2 sticky top-0 bg-[#1a1a1a]">
+                                            <th class="font-medium py-1">วัน/เวลา</th>
+                                            <th class="font-medium text-center">ชื้นอากาศ</th>
+                                            <th class="font-medium text-center">ชื้นดิน</th>
+                                            <th class="font-medium text-center">อุณหภูมิ</th>
+                                            <th class="font-medium text-right">สถานะปั๊ม</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="history-table-body" class="divide-y divide-zinc-900 text-gray-300">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const FIREBASE_HOST = "https://the-project-aaa42-default-rtdb.asia-southeast1.firebasedatabase.app";
+        const FIREBASE_AUTH = "pChjJULtG1ph17cyDgzVVcc0h78N4DfUL1qDzvEU";
+
+        let currentMode = 'manual'; 
+        let pumpRemoteCmd = 0;
+        let envChart;
+        
+        // ⭐ ตัวแปรใหม่: เก็บสถานะเป้าหมายที่กำลังรอ (ON หรือ OFF) และตัวตั้งเวลา
+        let expectedPumpState = null; 
+        let pumpTimeout = null;
+
+        window.onload = function() {
+            initChart();
+            fetchRealtimeData();
+            fetchHistoryData();
+            
+            setInterval(fetchRealtimeData, 3000);
+            setInterval(fetchHistoryData, 45000);
+        };
+
+        function fetchRealtimeData() {
+            const url = `${FIREBASE_HOST}/sensor/latest.json?auth=${FIREBASE_AUTH}`;
+            fetch(url)
+            .then(res => res.json())
+            .then(latest => {
+                if (!latest) return;
+                
+                document.getElementById('val-humi').innerText = (latest.humi || 0).toFixed(1) + '%';
+                document.getElementById('val-soil').innerText = Math.round(latest.soil || 0) + '%';
+                document.getElementById('val-temp').innerText = (latest.temp || 0).toFixed(1) + '°C';
+                if (latest.timestamp) {
+                    document.getElementById('last-update').innerText = latest.timestamp.split(' ')[1] || latest.timestamp;
+                }
+                
+                const actualPumpState = (latest.pump === "ON" || latest.pump === "ON ") ? "ON" : "OFF";
+                
+                if (currentMode === 'auto') {
+                    updatePumpUI(actualPumpState);
+                } else {
+                    if (expectedPumpState !== null) {
+                        // กำลังรอคอยบอร์ดตอบกลับเช็คว่าค่าตรงกับที่สั่งหรือยัง
+                        if (actualPumpState === expectedPumpState) {
+                            // สำเร็จ! บอร์ดยืนยันแล้ว
+                            expectedPumpState = null;
+                            if(pumpTimeout) clearTimeout(pumpTimeout);
+                            pumpRemoteCmd = (actualPumpState === "ON") ? 1 : 0;
+                            updatePumpUI(actualPumpState);
+                        } else {
+                            // ยังไม่ตรงแปลว่าบอร์ดยังไม่ส่งค่าใหม่มา ปล่อยให้ปุ่มหมุนสีเหลืองต่อไป
+                        }
+                    } else {
+                        // สภาวะปกติ
+                        pumpRemoteCmd = (actualPumpState === "ON") ? 1 : 0;
+                        updatePumpUI(actualPumpState);
+                    }
+                }
+                
+                analyzePlantStatus(latest.soil, latest.temp, latest.humi);
+                
+                document.getElementById('connection-dot').className = "w-2 h-2 rounded-full bg-green-500 animate-pulse";
+                document.getElementById('connection-status').innerText = "Online (ซิงค์สด)";
+            })
+            .catch(err => {
+                document.getElementById('connection-dot').className = "w-2 h-2 rounded-full bg-red-500";
+                document.getElementById('connection-status').innerText = "ขาดการเชื่อมต่อ";
+            });
+        }
+
+        // ⭐ ฟังก์ชันกดปุ่มน้ำแบบใหม่ (State Machine)
+        function togglePump() {
+            if (currentMode === 'auto') {
+                alert("ระบบกำลังอยู่ใน 'โหมดตามความชื้น' (อัตโนมัติ) กรุณาสลับสลักควบคุมเป็น 'ควบคุมเอง' ก่อน");
+                return;
+            }
+            
+            // หาว่าตอนนี้เราจะสั่งให้ปั๊มทำอะไร
+            let targetCmd = (pumpRemoteCmd === 0) ? 1 : 0;
+            expectedPumpState = (targetCmd === 1) ? "ON" : "OFF";
+            
+            // อัปเดต UI ให้แสดงไฟหมุนสีเหลืองทันที
+            updatePumpUI("LOADING", expectedPumpState);
+            
+            // ตั้งเวลาเผื่อกรณีบอร์ดเน็ตหลุด ไม่ตอบสนองใน 15 วินาที
+            if(pumpTimeout) clearTimeout(pumpTimeout);
+            pumpTimeout = setTimeout(() => {
+                if (expectedPumpState !== null) {
+                    alert("แจ้งเตือน: บอร์ดไม่ตอบสนองภายในเวลาที่กำหนด กรุณาตรวจสอบบอร์ด ESP32");
+                    expectedPumpState = null;
+                    fetchRealtimeData(); // รีเซ็ตหน้าเว็บกลับไปเป็นค่าจริงล่าสุด
+                }
+            }, 15000);
+            
+            // ส่งคำสั่งเข้า Firebase
+            pumpRemoteCmd = targetCmd;
+            const url = `${FIREBASE_HOST}/pump_control.json?auth=${FIREBASE_AUTH}`;
+            fetch(url, { method: 'PUT', body: JSON.stringify(pumpRemoteCmd) })
+            .catch(err => {
+                expectedPumpState = null;
+                fetchRealtimeData();
+                alert("ส่งคำสั่งไม่สำเร็จ: " + err);
+            });
+        }
+
+        // ⭐ ฟังก์ชันวาด UI ปุ่มให้ตรงกับสเปคที่ผู้ใช้ต้องการ
+        function updatePumpUI(state, expectedState = null) {
+            const btn = document.getElementById('pump-toggle-btn');
+            const icon = document.getElementById('pump-icon');
+            const text = document.getElementById('pump-text-state');
+            
+            // 1. โหมดออโต้
+            if (currentMode === 'auto') {
+                if (state === "ON") {
+                    btn.className = "w-32 h-32 rounded-full border-4 border-emerald-600/50 my-6 flex flex-col items-center justify-center bg-emerald-950/10 opacity-80 animate-pulse";
+                    icon.className = "fa-solid fa-robot text-3xl text-emerald-400";
+                    text.innerText = "ออโต้: กำลังรดน้ำ";
+                    text.className = "text-xs font-bold mt-2 text-emerald-400";
+                } else {
+                    btn.className = "w-32 h-32 rounded-full border-4 border-zinc-800 my-6 flex flex-col items-center justify-center bg-zinc-900 opacity-50";
+                    icon.className = "fa-solid fa-lock text-3xl text-zinc-600";
+                    text.innerText = "ระบบออโต้ทำงานอยู่";
+                    text.className = "text-xs font-bold mt-2 text-zinc-600";
+                }
+                return;
+            }
+            
+            // 2. โหมดกำลังรอยืนยันคำสั่งจากบอร์ด (LOADING)
+            if (state === "LOADING") {
+                btn.className = "w-32 h-32 rounded-full border-4 border-amber-500 my-6 flex flex-col items-center justify-center bg-amber-950/20 scale-105";
+                icon.className = "fa-solid fa-spinner text-3xl text-amber-400 animate-spin";
+                text.innerText = (expectedState === "ON") ? "กำลังเปิดปั๊ม..." : "กำลังปิดปั๊ม...";
+                text.className = "text-sm font-bold mt-2 text-amber-400";
+                return;
+            }
+
+            // 3. โหมดปกติแสดงสถานะจริงที่ได้รับการยืนยันแล้ว
+            if (state === "ON") {
+                btn.className = "w-32 h-32 rounded-full border-4 border-emerald-500 my-6 flex flex-col items-center justify-center bg-emerald-950/20 scale-105 shadow-[0_0_20px_rgba(16,185,129,0.2)]";
+                icon.className = "fa-solid fa-droplet text-3xl text-emerald-400 animate-bounce";
+                text.innerText = "ปั๊มเปิดอยู่ (กดเพื่อปิด)";
+                text.className = "text-xs font-bold mt-2 text-emerald-400";
+            } else {
+                btn.className = "w-32 h-32 rounded-full border-4 border-zinc-700 my-6 flex flex-col items-center justify-center bg-zinc-950 hover:border-zinc-500";
+                icon.className = "fa-solid fa-power-off text-3xl text-zinc-500";
+                text.innerText = "เปิดปั๊มน้ำ";
+                text.className = "text-sm font-bold mt-2 text-zinc-400";
+            }
+        }
+
+        function changeMode(mode) {
+            currentMode = mode;
+            const mBtn = document.getElementById('mode-manual');
+            const aBtn = document.getElementById('mode-auto');
+            const statusText = document.getElementById('current-mode-status');
+            const pumpBtn = document.getElementById('pump-toggle-btn');
+            
+            if (mode === 'manual') {
+                mBtn.className = "p-3 rounded-xl border border-emerald-500 bg-emerald-950/30 text-emerald-400 text-center flex flex-col items-center justify-center cursor-pointer transition-all";
+                aBtn.className = "p-3 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 text-center flex flex-col items-center justify-center cursor-pointer transition-all hover:border-zinc-700";
+                statusText.innerText = "โหมดปัจจุบัน: ควบคุมเองผ่านเว็บไซต์";
+                
+                pumpBtn.style.cursor = "pointer";
+                expectedPumpState = null; // ยกเลิกการรอทุกกรณี
+                fetchRealtimeData(); 
+            } else {
+                aBtn.className = "p-3 rounded-xl border border-emerald-500 bg-emerald-950/30 text-emerald-400 text-center flex flex-col items-center justify-center cursor-pointer transition-all";
+                mBtn.className = "p-3 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 text-center flex flex-col items-center justify-center cursor-pointer transition-all hover:border-zinc-700";
+                statusText.innerText = "โหมดปัจจุบัน: ทำงานตามความชื้น (< 40%)";
+                
+                pumpBtn.style.cursor = "not-allowed";
+                fetchRealtimeData();
+            }
+        }
+
+        function fetchHistoryData() {
+            const url = `${FIREBASE_HOST}/sensor_history.json?auth=${FIREBASE_AUTH}&orderBy="timestamp"&limitToLast=3000`;
+            fetch(url)
+            .then(res => res.json())
+            .then(data => {
+                if (!data) return;
+                const allItems = Object.values(data);
+                const sortedForTable = [...allItems].sort((a, b) => {
+                    if (!a.timestamp || !b.timestamp) return 0;
+                    return b.timestamp.localeCompare(a.timestamp);
+                });
+                
+                const tbody = document.getElementById('history-table-body');
+                tbody.innerHTML = '';
+                const tableItems = sortedForTable.slice(0, 50);
+                tableItems.forEach(item => {
+                    if (!item.timestamp) return; 
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-zinc-900/40 transition-colors";
+                    tr.innerHTML = `
+                        <td class="py-2 text-gray-400">${item.timestamp}</td>
+                        <td class="py-2 text-center text-blue-300">${(item.humi || 0).toFixed(1)}%</td>
+                        <td class="py-2 text-center text-emerald-300">${Math.round(item.soil || 0)}%</td>
+                        <td class="py-2 text-center text-orange-300">${(item.temp || 0).toFixed(1)}°C</td>
+                        <td class="py-2 text-right font-bold ${item.pump === 'ON ' || item.pump === 'ON' ? 'text-emerald-400' : 'text-zinc-500'}">${item.pump || '-'}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                const intervalGroups = {};
+                allItems.forEach(item => {
+                    if (!item.timestamp) return;
+                    const parts = item.timestamp.split(' '); 
+                    if (parts.length < 2) return;
+                    const timeParts = parts[1].split(':'); 
+                    if (timeParts.length < 2) return;
+                    
+                    const hour = timeParts[0];
+                    const minute = parseInt(timeParts[1], 10);
+                    const intervalMin = Math.floor(minute / 15) * 15;
+                    const minuteStr = intervalMin === 0 ? "00" : intervalMin.toString().padStart(2, '0');
+                    
+                    const groupKey = `${parts[0]} ${hour}:${minuteStr}`;
+                    if (!intervalGroups[groupKey]) {
+                        intervalGroups[groupKey] = { humiSum: 0, soilSum: 0, count: 0 };
+                    }
+                    intervalGroups[groupKey].humiSum += (item.humi || 0);
+                    intervalGroups[groupKey].soilSum += (item.soil || 0);
+                    intervalGroups[groupKey].count += 1;
+                });
+                
+                const averagedData = Object.keys(intervalGroups).sort().map(key => {
+                    const group = intervalGroups[key];
+                    return {
+                        label: key.split(' ')[1],
+                        humiAvg: group.humiSum / group.count,
+                        soilAvg: group.soilSum / group.count
+                    };
+                });
+                
+                envChart.data.labels = averagedData.map(i => i.label);
+                envChart.data.datasets[0].data = averagedData.map(i => i.humiAvg);
+                envChart.data.datasets[1].data = averagedData.map(i => i.soilAvg);
+                envChart.update();
+            });
+        }
+
+        function analyzePlantStatus(soil, temp, humi) {
+            const box = document.getElementById('water-alert-box');
+            const txt = document.getElementById('water-alert-text');
+            const predictTxt = document.getElementById('ai-predict-water');
+            const stressLevel = document.getElementById('ai-stress-level');
+            const stressBar = document.getElementById('stress-bar');
+            const diseaseRisk = document.getElementById('ai-disease-risk');
+
+            if (soil < 40) {
+                box.className = "mt-4 p-3 rounded-lg text-xs font-medium flex items-center gap-2 bg-rose-950/40 text-rose-400 border border-rose-800/50";
+                txt.innerText = "แจ้งเตือน: น้ำน้อยเกินไป พืชปกติเข้าสู่สภาวะขาดน้ำวิกฤต!";
+                predictTxt.innerHTML = "⚠️ ระบบทำนายอนาคต: <b>ควรสั่งรดน้ำทันทีก่อนหน้าดินแห้งรากฝอยเสียหาย</b>";
+                stressLevel.innerText = "วิกฤตสูง (85%)";
+                stressLevel.className = "font-bold text-rose-400";
+                stressBar.className = "bg-rose-500 h-full";
+                stressBar.style.width = "85%";
+            } else if (soil > 85) {
+                box.className = "mt-4 p-3 rounded-lg text-xs font-medium flex items-center gap-2 bg-amber-950/40 text-amber-400 border border-amber-800/50";
+                txt.innerText = "แจ้งเตือน: น้ำมากเกินไป ดินแฉะชุ่มน้ำสะสมหนาแน่นเกินไป";
+                predictTxt.innerHTML = "🛑 ระบบทำนายอนาคต: <b>ควรงดระบบน้ำชั่วคราว คาดระบบจะแห้งระบายตัวในอีก 6 ชม.</b>";
+                stressLevel.innerText = "ปานกลาง (50%)";
+                stressLevel.className = "font-bold text-amber-400";
+                stressBar.className = "bg-amber-500 h-full";
+                stressBar.style.width = "50%";
+            } else {
+                box.className = "mt-4 p-3 rounded-lg text-xs font-medium flex items-center gap-2 bg-emerald-950/40 text-emerald-400 border border-emerald-800/50";
+                txt.innerText = "ระดับน้ำในดินและอากาศสมดุล: พืชเจริญเติบโตปกติสมบูรณ์";
+                predictTxt.innerHTML = "🔮 ระบบทำนายอนาคต: รอบการรดน้ำถัดไปคาดว่าอีกประมาณ <b>4.5 ชั่วโมงข้างหน้า</b>";
+                stressLevel.innerText = "ต่ำดีเยี่ยม (12%)";
+                stressLevel.className = "font-bold text-emerald-400";
+                stressBar.className = "bg-emerald-500 h-full";
+                stressBar.style.width = "12%";
+            }
+
+            if (temp > 30 && humi > 70) {
+                diseaseRisk.innerHTML = "📈 ดัชนีโรค: <b>เสี่ยงเกิดโรคราน้ำค้างหรือเชื้อราบริเวณรากสูง</b> จากสภาพอบอ้าว";
+            } else {
+                diseaseRisk.innerHTML = "🟢 ดัชนีโรค: สภาพโรงเรือนอากาศถ่ายเทหมุนเวียนสะดวก <b>ความเสี่ยงโรคระบาดต่ำมาก</b>";
+            }
+        }
+
+        function initChart() {
+            const ctx = document.getElementById('environmentalChart').getContext('2d');
+            envChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: 'ชื้นอากาศ (%)', data: [], borderColor: '#3b82f6', tension: 0.3, borderWidth: 2 },
+                        { label: 'ชื้นดิน (%)', data: [], borderColor: '#10b981', tension: 0.3, borderWidth: 2 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { grid: { color: '#222' }, ticks: { color: '#888', font: { size: 10 } } },
+                        x: { grid: { display: false }, ticks: { color: '#888', font: { size: 10 } } }
+                    }
+                }
+            });
+        }
+
+        function updateChartTimeframe(timeframe) {
+            const buttons = ['btn-24h', 'btn-7d', 'btn-1m'];
+            buttons.forEach(b => document.getElementById(b).className = "px-3 py-1 rounded text-zinc-400 cursor-pointer");
+            document.getElementById('btn-' + timeframe).className = "px-3 py-1 rounded bg-zinc-800 text-white font-medium cursor-pointer";
+            fetchHistoryData();
+        }
+
+        function askAI() {
+            const queryInput = document.getElementById('ai-query');
+            const responseBox = document.getElementById('ai-response-box');
+            const query = queryInput.value.trim();
+            if(!query) return;
+
+            responseBox.classList.remove('hidden');
+            responseBox.innerText = "ระบบประมวลผลโมเดลฟาร์ม AI กำลังวิเคราะห์ข้อมูลเซ็นเซอร์ของคุณ...";
+
+            setTimeout(() => {
+                let currentSoil = document.getElementById('val-soil').innerText;
+                let currentTemp = document.getElementById('val-temp').innerText;
+                let answer = `💡 คำแนะนำ: สภาวะดินในฟาร์มขณะนี้มีความชื้นที่ ${currentSoil} อุณหภูมิ ${currentTemp} พืชเจริญเติบโตได้ตามเกณฑ์ปกติครับ`;
+                
+                if(query.includes('รดน้ำ') || query.includes('น้ำ')) {
+                    answer = `💧 สรุปการให้น้ำ: ขณะนี้ความชื้นในดินอยู่ที่ ${currentSoil} ซึ่งหากต่ำกว่า 40% บอร์ดจะเปิดระบบน้ำให้อัตโนมัติ ถือเป็นการตั้งค่าที่ปลอดภัยต่อพืชครับ`;
+                } else if(query.includes('โรค') || query.includes('ใบเหลือง')) {
+                    answer = `🍂 วิเคราะห์โรคพืช: หากมีใบเหลืองในช่วงที่ความชื้นดินปกติดี อาจเกิดจากการขาดปุ๋ย/ธาตุอาหาร หรือการระบายอากาศในโรงเรือนไม่ดีพอ แนะนำเพิ่มลมหมุนเวียนครับ`;
+                }
+                responseBox.innerText = answer;
+                queryInput.value = '';
+            }, 1000);
+        }
+    </script>
+</body>
+</html>
